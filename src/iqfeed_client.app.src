@@ -1,0 +1,11 @@
+{application, iqfeed_client,
+ [
+  {description, "IQFeed client"},
+  {vsn, "1"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {env, []}
+ ]}.

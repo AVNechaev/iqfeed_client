@@ -1,0 +1,6 @@
+deps
+ebin
+rel/iqfeed_client
+.idea/workspace.xml
+.idea/uiDesigner.xml
+.rebar
