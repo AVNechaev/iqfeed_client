@@ -12,7 +12,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/3]).
+-export([start_link/3, set_instrs/1]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -31,15 +31,22 @@
   instrs = [] :: [instr_name()], %% список акций, по которым запрашиваются тики
   sock = undefined :: undefined | gen_tcp:socket()
 }).
--compile([{parse_transform, lager_transform}]).
+
+-define(SERVER, ?MODULE).
 
 -define(RECONNECT_TIMEOUT, 500).
 -define(HANDSHAKE, <<"S,SET PROTOCOL,5.1", 10, 13>>).
+
+-compile([{parse_transform, lager_transform}]).
 %%%===================================================================
 %%% API
 %%%===================================================================
 -spec(start_link(IP :: string(), Port :: non_neg_integer(), Instrs :: [string() | binary()]) -> {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
-start_link(IP, Port, Instrs) -> gen_server:start_link(?MODULE, [IP, Port, Instrs], []).
+start_link(IP, Port, Instrs) -> gen_server:start_link({local, ?SERVER}, ?MODULE, [IP, Port, Instrs], []).
+
+%%--------------------------------------------------------------------
+-spec set_instrs(Instrs :: [instr_name()]) -> ok.
+set_instrs(Instrs) -> gen_server:call(?SERVER, {set_instrs, Instrs}).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -49,7 +56,7 @@ init([IP, Port, Instrs]) ->
   {ok, #state{ip = IP, port = Port, instrs = Instrs}}.
 
 %%--------------------------------------------------------------------
-handle_cast(connect, State = #state{ip = IP, port = Port}) ->
+handle_cast(connect, State = #state{ip = IP, port = Port, sock = S}) when S =:= undefined->
   SockOpts = [
     {active, true},
     {delay_send, false},
@@ -67,7 +74,7 @@ handle_cast(connect, State = #state{ip = IP, port = Port}) ->
     {error, Reason} ->
       lager:warning("IQFeed Level 1: couldn't connect due to: ~p", [Reason]),
       timer:sleep(?RECONNECT_TIMEOUT),
-      gen_server:cast(self, connect),
+      gen_server:cast(self(), connect),
       {noreply, State}
   end.
 
@@ -75,13 +82,25 @@ handle_cast(connect, State = #state{ip = IP, port = Port}) ->
 handle_info({tcp_error, _S, Reason}, State) ->
   lager:warning("IQFeed Level 1 connection lost due to: ~p", [Reason]),
   gen_server:cast(self(), connect),
+  {noreply, State = #state{sock = undefined}};
+%%---
+handle_info({tcp_closed, _S}, State) ->
   {noreply, State};
+%%---
 handle_info({tcp, _S, Data}, State) ->
   lager:info("IQFL1 got data: ~p", [Data]),
   {noreply, State}.
 
 %%--------------------------------------------------------------------
-handle_call(_Request, _From, _State) -> exit(handle_call_unsupported).
+handle_call({set_instrs, Instrs}, _From, State) ->
+  lager:info("Loading additional instruments to IQFeed [~p]...", [erlang:length(Instrs)]),
+  case State#state.sock of
+    undefined -> ok;
+    Sock -> init_instrs(Sock, Instrs)
+  end,
+  lager:info("Instruments are loaded."),
+  NewInstrs = Instrs ++ State#state.instrs,
+  {reply, ok, State#state{instrs = NewInstrs}}.
 
 %%--------------------------------------------------------------------
 terminate(_Reason, _State) -> ok.
@@ -91,4 +110,4 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 %%% Internal functions
 %%%===================================================================
 init_instrs(Socket, Instrs) ->
-  lists:foreach(fun(I) -> gen_tcp:send(Socket, [<<"t">>, I, 10, 13]) end, Instrs).
+  lists:foreach(fun(I) -> ok = gen_tcp:send(Socket, [<<"t">>, I, 13, 10]) end, Instrs).
