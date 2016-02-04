@@ -35,7 +35,7 @@ init([TickFun]) ->
     {iql1_conn, start_link, [
       TickFun,
       iqfeed_util:get_env(iqfeed_client, iqfeed_ip),
-      iqfeed_util:get_env(iqfeed_client, iqfeed_port),
+      iqfeed_util:get_env(iqfeed_client, iqfeed_l1_port),
       [] %% initial instruments
     ]},
     permanent, brutal_kill, worker, [iql1_conn]
