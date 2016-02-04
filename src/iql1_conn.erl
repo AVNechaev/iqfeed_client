@@ -129,7 +129,10 @@ process_data(AllData = <<"Q,", Data/binary>>, State) ->
       bid = binary_to_float(lists:nth(7, S)),
       ask = binary_to_float(lists:nth(9, S))
     },
-    (State#state.tick_fun)(Tick)
+    case lists:nth(15, S) of
+      <<"C">> -> (State#state.tick_fun)(Tick);
+      _ -> ok
+    end
   catch
     M:E ->
       lager:warning("Unexpected L1 update msg: ~p; error: ~p:~p", [AllData, M, E])
