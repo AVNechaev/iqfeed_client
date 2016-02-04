@@ -12,26 +12,28 @@
 -behaviour(supervisor).
 
 %% API
--export([start_link/0]).
+-export([start_link/1]).
 
 %% Supervisor callbacks
 -export([init/1]).
 
+-include("iqfeed_client.hrl").
 -define(SERVER, ?MODULE).
 
 %%%===================================================================
 %%% API functions
 %%%===================================================================
--spec(start_link() -> {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
-start_link() ->
-  supervisor:start_link({local, ?SERVER}, ?MODULE, []).
+-spec(start_link(TickFun :: tick_fun()) -> {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
+start_link(TickFun) ->
+  supervisor:start_link({local, ?SERVER}, ?MODULE, [TickFun]).
 
 %%%===================================================================
 %%% Supervisor callbacks
 %%%===================================================================
-init([]) ->
+init([TickFun]) ->
   IQLevel1 = {iql1_conn,
     {iql1_conn, start_link, [
+      TickFun,
       iqfeed_util:get_env(iqfeed_client, iqfeed_ip),
       iqfeed_util:get_env(iqfeed_client, iqfeed_port),
       [] %% initial instruments

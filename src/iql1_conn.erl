@@ -12,7 +12,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/3, set_instrs/1]).
+-export([start_link/4, set_instrs/1]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -22,14 +22,14 @@
   terminate/2,
   code_change/3]).
 
--type(instr_name() :: string() | binary()).
--export_type([instr_name/0]).
+-include("iqfeed_client.hrl").
 
 -record(state, {
   ip :: string(),
   port :: non_neg_integer(),
   instrs = [] :: [instr_name()], %% список акций, по которым запрашиваются тики
-  sock = undefined :: undefined | gen_tcp:socket()
+  sock = undefined :: undefined | gen_tcp:socket(),
+  tick_fun :: tick_fun()
 }).
 
 -define(SERVER, ?MODULE).
@@ -41,8 +41,12 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
--spec(start_link(IP :: string(), Port :: non_neg_integer(), Instrs :: [string() | binary()]) -> {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
-start_link(IP, Port, Instrs) -> gen_server:start_link({local, ?SERVER}, ?MODULE, [IP, Port, Instrs], []).
+-spec(start_link(
+    TickFun :: tick_fun(),
+    IP :: string(),
+    Port :: non_neg_integer(),
+    Instrs :: [string() | binary()]) -> {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
+start_link(TickFun, IP, Port, Instrs) -> gen_server:start_link({local, ?SERVER}, ?MODULE, [TickFun, IP, Port, Instrs], []).
 
 %%--------------------------------------------------------------------
 -spec set_instrs(Instrs :: [instr_name()]) -> ok.
@@ -51,9 +55,9 @@ set_instrs(Instrs) -> gen_server:call(?SERVER, {set_instrs, Instrs}).
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
-init([IP, Port, Instrs]) ->
+init([TickFun, IP, Port, Instrs]) ->
   gen_server:cast(self(), connect),
-  {ok, #state{ip = IP, port = Port, instrs = Instrs}}.
+  {ok, #state{tick_fun = TickFun, ip = IP, port = Port, instrs = Instrs}}.
 
 %%--------------------------------------------------------------------
 handle_cast(connect, State = #state{ip = IP, port = Port, sock = S}) when S =:= undefined->
@@ -88,7 +92,7 @@ handle_info({tcp_closed, _S}, State) ->
   {noreply, State};
 %%---
 handle_info({tcp, _S, Data}, State) ->
-  lager:info("IQFL1 got data: ~p", [Data]),
+  ok = process_data(Data, State),
   {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -111,3 +115,31 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 %%%===================================================================
 init_instrs(Socket, Instrs) ->
   lists:foreach(fun(I) -> ok = gen_tcp:send(Socket, [<<"t">>, I, 13, 10]) end, Instrs).
+
+%%--------------------------------------------------------------------
+-spec process_data(Data :: binary(), State :: #state{}) -> ok.
+process_data(AllData = <<"Q,", Data/binary>>, State) ->
+  S = binary:split(Data, <<",">>, [global]),
+  try
+    Tick = #tick{
+      name = lists:nth(1, S),
+      last_price = binary_to_float(lists:nth(2, S)),
+      last_vol = binary_to_integer(lists:nth(3, S)),
+      time = bin2time(lists:nth(4, S)),
+      bid = binary_to_float(lists:nth(7, S)),
+      ask = binary_to_float(lists:nth(9, S))
+    },
+    (State#state.tick_fun)(Tick)
+  catch
+    M:E ->
+      lager:warning("Unexpected L1 update msg: ~p; error: ~p:~p", [AllData, M, E])
+  end,
+  ok;
+process_data(Data, _State) ->
+  lager:info("IQFeed Level 1 message: ~p", [Data]),
+  ok.
+
+%%--------------------------------------------------------------------
+-spec bin2time(B :: binary()) -> calendar:time().
+bin2time(<<H:2/binary, $:, M:2/binary, $:, S:2/binary, _/binary>>) ->
+  {binary_to_integer(H), binary_to_integer(M), binary_to_integer(S)}.
