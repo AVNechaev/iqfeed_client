@@ -10,7 +10,7 @@
 -author("anechaev").
 
 %% API
--export([load_instr_csv/1, get_env/2]).
+-export([load_instr_csv/1, load_instr_csv/2, get_env/2]).
 
 -compile([{parse_transform, lager_transform}]).
 
