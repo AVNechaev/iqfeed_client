@@ -19,6 +19,7 @@ run() ->
   lager:start(),
   application:set_env(iqfeed_client, iqfeed_ip, "127.0.0.1"),
   application:set_env(iqfeed_client, iqfeed_l1_port, 5009),
+  application:set_env(iqfeed_client, instr_file, "/tmp/iqinstr.csv"),
+  application:set_env(iqfeed_client, instr_file_header, 1),
   iq_sup:start_link(F),
-  iq_ifc:update_instrs("/home/anechaev/tmp/iqinstr.csv"),
   ok.
