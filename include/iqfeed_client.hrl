@@ -4,7 +4,7 @@
   name :: binary(),
   last_price :: float(),
   last_vol :: integer(),
-  time :: calendar:time(),
+  time :: pos_integer(),
   bid :: float(),
   ask :: float()
 }).
