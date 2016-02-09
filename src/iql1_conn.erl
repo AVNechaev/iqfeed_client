@@ -155,7 +155,7 @@ process_data(AllData = <<"Q,", Data/binary>>, State) ->
   end,
   ok;
 process_data(Data, _State) ->
-  lager:info("IQFeed Level 1 message: ~p", [Data]),
+  lager:debug("IQFeed Level 1 message: ~p", [Data]),
   ok.
 
 %%--------------------------------------------------------------------
