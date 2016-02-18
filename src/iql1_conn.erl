@@ -155,9 +155,9 @@ process_data(AllData = <<"Q,", Data/binary>>, State) ->
 process_data(<<"T,", Y:4/binary, M:2/binary, D:2/binary, " ", _/binary>>, State) ->
   {ok, State#state{current_day = {binary_to_integer(Y), binary_to_integer(M), binary_to_integer(D)}}};
 %%---
-process_data(Data, _State) ->
+process_data(Data, State) ->
   lager:debug("IQFeed Level 1 message: ~p", [Data]),
-  ok.
+  {ok, State}.
 
 %%--------------------------------------------------------------------
 -spec bin2time(B :: binary(), CurrentDay :: calendar:date()) -> pos_integer().
