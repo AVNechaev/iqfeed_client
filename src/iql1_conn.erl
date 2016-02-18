@@ -35,7 +35,6 @@
 }).
 
 -define(SERVER, ?MODULE).
--define(CURRENT_DAY_UPDATER_THRESHOLD, 5*60*1000). %%5 минут - перепроверять какой текущий день
 
 -define(RECONNECT_TIMEOUT, 500).
 -define(HANDSHAKE, <<"S,SET PROTOCOL,5.1", 10, 13>>).
@@ -61,14 +60,16 @@ set_instrs(Instrs) -> gen_server:call(?SERVER, {set_instrs, Instrs}).
 init([TickFun, IP, Port, Instrs]) ->
   gen_server:cast(self(), connect),
   TZSeconds = iqfeed_util:get_env(iqfeed_client, timezone_hours) * 60 * 60,
-  erlang:send_after(?CURRENT_DAY_UPDATER_THRESHOLD, self(), update_current_day),
+  {Day, _} = calendar:gregorian_seconds_to_datetime(
+    calendar:datetime_to_gregorian_seconds(
+      calendar:universal_time()) + TZSeconds),
   {ok, #state{
     tick_fun = TickFun,
     ip = IP,
     port = Port,
     instrs = Instrs,
     timezone_seconds = TZSeconds,
-    current_day = get_current_day(TZSeconds)
+    current_day = Day
   }}.
 
 %%--------------------------------------------------------------------
@@ -104,12 +105,8 @@ handle_info({tcp_closed, _S}, State) ->
   {noreply, State};
 %%---
 handle_info({tcp, _S, Data}, State) ->
-  ok = process_data(Data, State),
-  {noreply, State};
-%%---
-handle_info(update_current_day, State) ->
-  erlang:send_after(?CURRENT_DAY_UPDATER_THRESHOLD, self(), update_current_day),
-  {noreply, State#state{current_day = get_current_day(State#state.timezone_seconds)}}.
+  {ok, NewState} = process_data(Data, State),
+  {noreply, NewState}.
 
 %%--------------------------------------------------------------------
 handle_call({set_instrs, Instrs}, _From, State) ->
@@ -153,7 +150,11 @@ process_data(AllData = <<"Q,", Data/binary>>, State) ->
     M:E ->
       lager:warning("Unexpected L1 update msg: ~p; error: ~p:~p", [AllData, M, E])
   end,
-  ok;
+  {ok, State};
+%%---
+process_data(<<"T,", Y:4/binary, M:2/binary, D:2/binary, " ", _/binary>>, State) ->
+  {ok, State#state{current_day = {binary_to_integer(Y), binary_to_integer(M), binary_to_integer(D)}}};
+%%---
 process_data(Data, _State) ->
   lager:debug("IQFeed Level 1 message: ~p", [Data]),
   ok.
@@ -162,11 +163,3 @@ process_data(Data, _State) ->
 -spec bin2time(B :: binary(), CurrentDay :: calendar:date()) -> pos_integer().
 bin2time(<<H:2/binary, $:, M:2/binary, $:, S:2/binary, _/binary>>, CurrentDay) ->
   calendar:datetime_to_gregorian_seconds({CurrentDay, {binary_to_integer(H), binary_to_integer(M), binary_to_integer(S)}}).
-
-%%--------------------------------------------------------------------
--spec get_current_day(TZSeconds :: integer()) -> calendar:date().
-get_current_day(TZSeconds) ->
-  {Day, _} = calendar:gregorian_seconds_to_datetime(
-    calendar:datetime_to_gregorian_seconds(
-      calendar:universal_time()) + TZSeconds),
-  Day.
