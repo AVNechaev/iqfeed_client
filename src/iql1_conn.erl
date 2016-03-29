@@ -12,7 +12,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/4, set_instrs/1]).
+-export([start_link/4, set_instrs/1, get_instrs/0]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -51,8 +51,12 @@
 start_link(TickFun, IP, Port, Instrs) -> gen_server:start_link({local, ?SERVER}, ?MODULE, [TickFun, IP, Port, Instrs], []).
 
 %%--------------------------------------------------------------------
--spec set_instrs(Instrs :: [instr_name()]) -> ok.
-set_instrs(Instrs) -> gen_server:call(?SERVER, {set_instrs, Instrs}).
+-spec set_instrs(Instrs :: [instr_name()]) -> {Added :: non_neg_integer(), Duplicates :: non_neg_integer()}.
+set_instrs(Instrs) -> gen_server:call(?SERVER, {set_instrs, Instrs}, infinity).
+
+%%--------------------------------------------------------------------
+-spec get_instrs() -> [instr_name()].
+get_instrs() -> gen_server:call(?SERVER, get_instrs, infinity).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -67,7 +71,7 @@ init([TickFun, IP, Port, Instrs]) ->
     tick_fun = TickFun,
     ip = IP,
     port = Port,
-    instrs = Instrs,
+    instrs = lists:usort(Instrs),
     timezone_seconds = TZSeconds,
     current_day = Day
   }}.
@@ -110,14 +114,22 @@ handle_info({tcp, _S, Data}, State) ->
 
 %%--------------------------------------------------------------------
 handle_call({set_instrs, Instrs}, _From, State) ->
-  lager:info("Loading additional instruments to IQFeed [~p]...", [erlang:length(Instrs)]),
+  UniqInstrs = lists:usort(Instrs),
+  lager:info(
+    "Loading additional instruments to IQFeed [~p]; unique:~p...",
+    [erlang:length(Instrs), erlang:length(UniqInstrs)]),
+  CurInstrsCnt = erlang:length(State#state.instrs),
+  NewInstrs = lists:umerge(State#state.instrs, UniqInstrs),
+  Added = erlang:length(NewInstrs) - CurInstrsCnt,
+  Duplicates = erlang:length(Instrs) - Added,
   case State#state.sock of
     undefined -> ok;
-    Sock -> init_instrs(Sock, Instrs)
+    Sock -> init_instrs(Sock, NewInstrs)
   end,
   lager:info("Instruments are loaded."),
-  NewInstrs = Instrs ++ State#state.instrs,
-  {reply, ok, State#state{instrs = NewInstrs}}.
+  {reply, {Added, Duplicates}, State#state{instrs = NewInstrs}};
+%%---
+handle_call(get_instrs, _From, State) -> {reply, State#state.instrs, State}.
 
 %%--------------------------------------------------------------------
 terminate(_Reason, _State) -> ok.
