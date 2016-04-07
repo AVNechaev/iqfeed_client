@@ -30,7 +30,7 @@
   instrs = [] :: [instr_name()], %% список акций, по которым запрашиваются тики
   sock = undefined :: undefined | gen_tcp:socket(),
   tick_fun :: tick_fun(),
-  timezone_seconds :: integer(),
+  timezone :: string(),
   current_day :: calendar:date()
 }).
 
@@ -63,16 +63,14 @@ get_instrs() -> gen_server:call(?SERVER, get_instrs, infinity).
 %%%===================================================================
 init([TickFun, IP, Port, Instrs]) ->
   gen_server:cast(self(), connect),
-  TZSeconds = iqfeed_util:get_env(iqfeed_client, timezone_hours) * 60 * 60,
-  {Day, _} = calendar:gregorian_seconds_to_datetime(
-    calendar:datetime_to_gregorian_seconds(
-      calendar:universal_time()) + TZSeconds),
+  Timezone = iqfeed_util:get_env(iqfeed_client, timezone),
+  {Day, _} = localtime:utc_to_local(erlang:universaltime(), Timezone),
   {ok, #state{
     tick_fun = TickFun,
     ip = IP,
     port = Port,
     instrs = lists:usort(Instrs),
-    timezone_seconds = TZSeconds,
+    timezone = Timezone,
     current_day = Day
   }}.
 
@@ -150,7 +148,7 @@ process_data(AllData = <<"Q,", Data/binary>>, State) ->
       name = lists:nth(1, S),
       last_price = binary_to_float(lists:nth(2, S)),
       last_vol = binary_to_integer(lists:nth(3, S)),
-      time = bin2time(lists:nth(4, S), State#state.current_day),
+      time = bin2time(lists:nth(4, S), State),
       bid = binary_to_float(lists:nth(7, S)),
       ask = binary_to_float(lists:nth(9, S))
     },
@@ -173,5 +171,6 @@ process_data(Data, State) ->
 
 %%--------------------------------------------------------------------
 -spec bin2time(B :: binary(), CurrentDay :: calendar:date()) -> pos_integer().
-bin2time(<<H:2/binary, $:, M:2/binary, $:, S:2/binary, _/binary>>, CurrentDay) ->
-  calendar:datetime_to_gregorian_seconds({CurrentDay, {binary_to_integer(H), binary_to_integer(M), binary_to_integer(S)}}).
+bin2time(<<H:2/binary, $:, M:2/binary, $:, S:2/binary, _/binary>>, State) ->
+  DateTime = {State#state.current_day, {binary_to_integer(H), binary_to_integer(M), binary_to_integer(S)}},
+  calendar:datetime_to_gregorian_seconds(localtime:local_to_utc(DateTime, State#state.timezone)).
