@@ -12,7 +12,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/4, set_instrs/1, get_instrs/0]).
+-export([start_link/4, set_instrs/1, get_instrs/0, get_stock_open_utc/0]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -31,7 +31,9 @@
   sock = undefined :: undefined | gen_tcp:socket(),
   tick_fun :: tick_fun(),
   timezone :: string(),
-  current_day :: calendar:date()
+  current_day :: calendar:date(),
+  stock_open_time :: calendar:time(),
+  current_stock_open :: non_neg_integer() %% UTC
 }).
 
 -define(SERVER, ?MODULE).
@@ -48,7 +50,8 @@
     IP :: string(),
     Port :: non_neg_integer(),
     Instrs :: [string() | binary()]) -> {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
-start_link(TickFun, IP, Port, Instrs) -> gen_server:start_link({local, ?SERVER}, ?MODULE, [TickFun, IP, Port, Instrs], []).
+start_link(TickFun, IP, Port, Instrs) ->
+  gen_server:start_link({local, ?SERVER}, ?MODULE, [TickFun, IP, Port, Instrs], []).
 
 %%--------------------------------------------------------------------
 -spec set_instrs(Instrs :: [instr_name()]) -> {Added :: non_neg_integer(), Duplicates :: non_neg_integer()}.
@@ -58,6 +61,10 @@ set_instrs(Instrs) -> gen_server:call(?SERVER, {set_instrs, Instrs}, infinity).
 -spec get_instrs() -> [instr_name()].
 get_instrs() -> gen_server:call(?SERVER, get_instrs, infinity).
 
+%%--------------------------------------------------------------------
+-spec get_stock_open_utc() -> non_neg_integer().
+get_stock_open_utc() -> gen_server:call(?SERVER, get_stock_open_utc, infinity).
+
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
@@ -65,17 +72,20 @@ init([TickFun, IP, Port, Instrs]) ->
   gen_server:cast(self(), connect),
   Timezone = iqfeed_util:get_env(iqfeed_client, timezone),
   {Day, _} = localtime:utc_to_local(erlang:universaltime(), Timezone),
+  StockOpenTime = iqfeed_util:get_env(iqfeed_client, trading_start),
   {ok, #state{
     tick_fun = TickFun,
     ip = IP,
     port = Port,
     instrs = lists:usort(Instrs),
     timezone = Timezone,
-    current_day = Day
+    current_day = Day,
+    stock_open_time = StockOpenTime,
+    current_stock_open = calendar:datetime_to_gregorian_seconds(localtime:local_to_utc({Day, StockOpenTime}, Timezone))
   }}.
 
 %%--------------------------------------------------------------------
-handle_cast(connect, State = #state{ip = IP, port = Port, sock = S}) when S =:= undefined->
+handle_cast(connect, State = #state{ip = IP, port = Port, sock = S}) when S =:= undefined ->
   SockOpts = [
     {active, true},
     {delay_send, false},
@@ -127,7 +137,9 @@ handle_call({set_instrs, Instrs}, _From, State) ->
   lager:info("Instruments are loaded."),
   {reply, {Added, Duplicates}, State#state{instrs = NewInstrs}};
 %%---
-handle_call(get_instrs, _From, State) -> {reply, State#state.instrs, State}.
+handle_call(get_instrs, _From, State) -> {reply, State#state.instrs, State};
+%%---
+handle_call(get_stock_open_utc, _From, State) -> {reply, State#state.current_stock_open, State}.
 
 %%--------------------------------------------------------------------
 terminate(_Reason, _State) -> ok.
@@ -163,7 +175,10 @@ process_data(AllData = <<"Q,", Data/binary>>, State) ->
   {ok, State};
 %%---
 process_data(<<"T,", Y:4/binary, M:2/binary, D:2/binary, " ", _/binary>>, State) ->
-  {ok, State#state{current_day = {binary_to_integer(Y), binary_to_integer(M), binary_to_integer(D)}}};
+  Day = {binary_to_integer(Y), binary_to_integer(M), binary_to_integer(D)},
+  StockOpen = calendar:datetime_to_gregorian_seconds(
+    localtime:local_to_utc({Day, State#state.stock_open_time}, State#state.timezone)),
+  {ok, State#state{current_day = Day, current_stock_open = StockOpen}};
 %%---
 process_data(Data, State) ->
   lager:debug("IQFeed Level 1 message: ~p", [Data]),
