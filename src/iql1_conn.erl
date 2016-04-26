@@ -25,6 +25,7 @@
 -include("iqfeed_client.hrl").
 
 -record(state, {
+  dump_file :: file:io_device(),
   ip :: string(),
   port :: non_neg_integer(),
   instrs = [] :: [instr_name()], %% список акций, по которым запрашиваются тики
@@ -74,7 +75,9 @@ init([TickFun, IP, Port, Instrs]) ->
   Timezone = iqfeed_util:get_env(iqfeed_client, timezone),
   {Day, _} = localtime:utc_to_local(erlang:universaltime(), Timezone),
   StockOpenTime = iqfeed_util:get_env(iqfeed_client, trading_start),
+  {ok, H} = file:open(iqfeed_util:get_env(iqfeed_client, tick_dump), [raw, binary, append, {delayed_write, 1024*4096}]),
   {ok, #state{
+    dump_file = H,
     tick_fun = TickFun,
     ip = IP,
     port = Port,
@@ -163,7 +166,9 @@ process_data(AllData = <<"Q,", Data/binary>>, State) ->
       ask = binary_to_float(lists:nth(9, S))
     },
     case lists:nth(15, S) of
-      <<"C">> -> (State#state.tick_fun)(Tick);
+      <<"C">> ->
+        file:write(State#state.dump_file, [integer_to_binary(Tick#tick.time), <<"-">>, Data]),
+        (State#state.tick_fun)(Tick);
       _ -> ok
     end
   catch
