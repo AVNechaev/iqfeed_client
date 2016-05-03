@@ -76,7 +76,6 @@ init([TickFun, IP, Port, Instrs]) ->
   {Day, _} = localtime:utc_to_local(erlang:universaltime(), Timezone),
   StockOpenTime = iqfeed_util:get_env(iqfeed_client, trading_start),
   {ok, H} = file:open(iqfeed_util:get_env(iqfeed_client, tick_dump), [raw, binary, append, {delayed_write, 1024*4096, 1000}]),
-  H = undefined,
   {ok, #state{
     dump_file = H,
     tick_fun = TickFun,
