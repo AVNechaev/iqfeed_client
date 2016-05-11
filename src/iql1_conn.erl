@@ -217,7 +217,7 @@ bin2time(<<H:2/binary, $:, M:2/binary, $:, S:2/binary, _/binary>>, State) ->
 -spec write_data(Data :: iolist(), State :: #state{}) -> #state{}.
 write_data(_, State = #state{dump_file = undefined}) -> State;
 write_data(Data, State) ->
-  NewLength = State#state + erlang:iolist_size(Data),
+  NewLength = State#state.dump_current_size + erlang:iolist_size(Data),
   if
     NewLength < State#state.dump_max_size ->
       file:write(State#state.dump_file, Data),
