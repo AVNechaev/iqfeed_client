@@ -25,7 +25,9 @@
 -include("iqfeed_client.hrl").
 
 -record(state, {
-  dump_file :: file:io_device(),
+  dump_file :: file:io_device() | undefined,
+  dump_current_size :: non_neg_integer(),
+  dump_max_size :: non_neg_integer(),
   ip :: string(),
   port :: non_neg_integer(),
   instrs = [] :: [instr_name()], %% список акций, по которым запрашиваются тики
@@ -42,6 +44,8 @@
 
 -define(RECONNECT_TIMEOUT, 500).
 -define(HANDSHAKE, <<"S,SET PROTOCOL,5.1", 10, 13>>).
+
+-define(DUMP_FILE_MODE, [raw, binary, append, {delayed_write, 1024 * 4096, 1000}]).
 
 -compile([{parse_transform, lager_transform}]).
 %%%========================================================io_lib:format===========
@@ -79,9 +83,17 @@ init([TickFun, IP, Port, Instrs]) ->
   LocalSeconds = calendar:datetime_to_gregorian_seconds({Day, StockOpenTime}),
   UTCSeconds = calendar:datetime_to_gregorian_seconds(localtime:local_to_utc({Day, StockOpenTime}, Timezone)),
   Shift = UTCSeconds - LocalSeconds,
-  {ok, H} = file:open(iqfeed_util:get_env(iqfeed_client, tick_dump), [raw, binary, append, {delayed_write, 1024*4096, 1000}]),
+  Handle = case iqfeed_util:get_env(iqfeed_client, tick_dump_enable) of
+             true ->
+               {ok, H} = file:open(iqfeed_util:get_env(iqfeed_client, tick_dump), ?DUMP_FILE_MODE),
+               H;
+             false ->
+               undefined
+           end,
   {ok, #state{
-    dump_file = H,
+    dump_file = Handle,
+    dump_current_size = filelib:file_size(iqfeed_util:get_env(iqfeed_client, tick_dump)),
+    dump_max_size = iqfeed_util:get_env(iqfeed_client, tick_dump_max_size),
     tick_fun = TickFun,
     ip = IP,
     port = Port,
@@ -158,7 +170,7 @@ init_instrs(Socket, Instrs) ->
   lists:foreach(fun(I) -> ok = gen_tcp:send(Socket, [<<"t">>, I, 13, 10]) end, Instrs).
 
 %%--------------------------------------------------------------------
--spec process_data(Data :: binary(), State :: #state{}) -> ok.
+-spec process_data(Data :: binary(), State :: #state{}) -> {ok, NewState :: #state{}}.
 process_data(AllData = <<"Q,", Data/binary>>, State) ->
   S = binary:split(Data, <<",">>, [global]),
   try
@@ -172,15 +184,17 @@ process_data(AllData = <<"Q,", Data/binary>>, State) ->
     },
     case lists:nth(15, S) of
       <<"C">> ->
-        file:write(State#state.dump_file, [integer_to_binary(Tick#tick.time), <<"-">>, Data]),
-        (State#state.tick_fun)(Tick);
-      _ -> ok
+        NewState = write_data([integer_to_binary(Tick#tick.time), <<"-">>, Data], State),
+        (State#state.tick_fun)(Tick),
+        {ok, NewState};
+      _ ->
+        {ok, State}
     end
   catch
     M:E ->
-      lager:warning("Unexpected L1 update msg: ~p; error: ~p:~p", [AllData, M, E])
-  end,
-  {ok, State};
+      lager:warning("Unexpected L1 update msg: ~p; error: ~p:~p", [AllData, M, E]),
+      {ok, State}
+  end;
 %%---
 process_data(<<"T,", Y:4/binary, M:2/binary, D:2/binary, " ", _/binary>>, State) ->
   Day = {binary_to_integer(Y), binary_to_integer(M), binary_to_integer(D)},
@@ -198,3 +212,21 @@ process_data(Data, State) ->
 bin2time(<<H:2/binary, $:, M:2/binary, $:, S:2/binary, _/binary>>, State) ->
   DateTime = {State#state.current_day, {binary_to_integer(H), binary_to_integer(M), binary_to_integer(S)}},
   calendar:datetime_to_gregorian_seconds(DateTime) + State#state.shift_to_utc.
+
+%%--------------------------------------------------------------------
+-spec write_data(Data :: iolist(), State :: #state{}) -> #state{}.
+write_data(_, State = #state{dump_file = undefined}) -> State;
+write_data(Data, State) ->
+  NewLength = State#state + erlang:iolist_size(Data),
+  if
+    NewLength < State#state.dump_max_size ->
+      file:write(State#state.dump_file, Data),
+      State#state{dump_current_size = NewLength};
+    true ->
+      file:close(State#state.dump_file),
+      FileName = iqfeed_util:get_env(iqfeed_client, tick_dump),
+      ok = file:rename(FileName, FileName ++ ".old"),
+      {ok, H} = file:open(FileName, ?DUMP_FILE_MODE),
+      file:write(H, Data),
+      State#state{dump_current_size = erlang:iolist_size(Data), dump_file = H}
+  end.
