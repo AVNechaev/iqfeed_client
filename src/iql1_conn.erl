@@ -25,6 +25,7 @@
 -include("iqfeed_client.hrl").
 
 -record(state, {
+  dump_file :: file:io_device(),
   ip :: string(),
   port :: non_neg_integer(),
   instrs = [] :: [instr_name()], %% список акций, по которым запрашиваются тики
@@ -55,6 +56,7 @@ start_link(TickFun, IP, Port, Instrs) ->
   gen_server:start_link({local, ?SERVER}, ?MODULE, [TickFun, IP, Port, Instrs], []).
 
 %%--------------------------------------------------------------------
+%% устанавливает новый список инструментов, старые инструменты удаляются
 -spec set_instrs(Instrs :: [instr_name()]) -> {Added :: non_neg_integer(), Duplicates :: non_neg_integer()}.
 set_instrs(Instrs) -> gen_server:call(?SERVER, {set_instrs, Instrs}, infinity).
 
@@ -77,7 +79,9 @@ init([TickFun, IP, Port, Instrs]) ->
   LocalSeconds = calendar:datetime_to_gregorian_seconds({Day, StockOpenTime}),
   UTCSeconds = calendar:datetime_to_gregorian_seconds(localtime:local_to_utc({Day, StockOpenTime}, Timezone)),
   Shift = UTCSeconds - LocalSeconds,
+  {ok, H} = file:open(iqfeed_util:get_env(iqfeed_client, tick_dump), [raw, binary, append, {delayed_write, 1024*4096, 1000}]),
   {ok, #state{
+    dump_file = H,
     tick_fun = TickFun,
     ip = IP,
     port = Port,
@@ -128,19 +132,16 @@ handle_info({tcp, _S, Data}, State) ->
 %%--------------------------------------------------------------------
 handle_call({set_instrs, Instrs}, _From, State) ->
   UniqInstrs = lists:usort(Instrs),
-  lager:info(
-    "Loading additional instruments to IQFeed [~p]; unique:~p...",
-    [erlang:length(Instrs), erlang:length(UniqInstrs)]),
-  CurInstrsCnt = erlang:length(State#state.instrs),
-  NewInstrs = lists:umerge(State#state.instrs, UniqInstrs),
-  Added = erlang:length(NewInstrs) - CurInstrsCnt,
-  Duplicates = erlang:length(Instrs) - Added,
+  Total = erlang:length(Instrs),
+  Added = erlang:length(UniqInstrs),
+  lager:info("Loading additional instruments to IQFeed [~p]; unique:~p...", [Total, Added]),
+
   case State#state.sock of
     undefined -> ok;
-    Sock -> init_instrs(Sock, NewInstrs)
+    Sock -> init_instrs(Sock, UniqInstrs)
   end,
   lager:info("Instruments are loaded."),
-  {reply, {Added, Duplicates}, State#state{instrs = NewInstrs}};
+  {reply, {Added, Total - Added}, State#state{instrs = UniqInstrs}};
 %%---
 handle_call(get_instrs, _From, State) -> {reply, State#state.instrs, State};
 %%---
@@ -170,7 +171,9 @@ process_data(AllData = <<"Q,", Data/binary>>, State) ->
       ask = binary_to_float(lists:nth(9, S))
     },
     case lists:nth(15, S) of
-      <<"C">> -> (State#state.tick_fun)(Tick);
+      <<"C">> ->
+        file:write(State#state.dump_file, [integer_to_binary(Tick#tick.time), <<"-">>, Data]),
+        (State#state.tick_fun)(Tick);
       _ -> ok
     end
   catch
