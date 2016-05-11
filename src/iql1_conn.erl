@@ -33,7 +33,8 @@
   timezone :: string(),
   current_day :: calendar:date(),
   stock_open_time :: calendar:time(),
-  current_stock_open :: non_neg_integer() %% UTC
+  current_stock_open :: non_neg_integer(), %% UTC
+  shift_to_utc :: integer() %% current timezone shift to UTC
 }).
 
 -define(SERVER, ?MODULE).
@@ -73,6 +74,9 @@ init([TickFun, IP, Port, Instrs]) ->
   Timezone = iqfeed_util:get_env(iqfeed_client, timezone),
   {Day, _} = localtime:utc_to_local(erlang:universaltime(), Timezone),
   StockOpenTime = iqfeed_util:get_env(iqfeed_client, trading_start),
+  LocalSeconds = calendar:datetime_to_gregorian_seconds({Day, StockOpenTime}),
+  UTCSeconds = calendar:datetime_to_gregorian_seconds(localtime:local_to_utc({Day, StockOpenTime}, Timezone)),
+  Shift = UTCSeconds - LocalSeconds,
   {ok, #state{
     tick_fun = TickFun,
     ip = IP,
@@ -81,7 +85,8 @@ init([TickFun, IP, Port, Instrs]) ->
     timezone = Timezone,
     current_day = Day,
     stock_open_time = StockOpenTime,
-    current_stock_open = calendar:datetime_to_gregorian_seconds(localtime:local_to_utc({Day, StockOpenTime}, Timezone))
+    current_stock_open = calendar:datetime_to_gregorian_seconds(localtime:local_to_utc({Day, StockOpenTime}, Timezone)),
+    shift_to_utc = Shift
   }}.
 
 %%--------------------------------------------------------------------
@@ -178,7 +183,8 @@ process_data(<<"T,", Y:4/binary, M:2/binary, D:2/binary, " ", _/binary>>, State)
   Day = {binary_to_integer(Y), binary_to_integer(M), binary_to_integer(D)},
   StockOpen = calendar:datetime_to_gregorian_seconds(
     localtime:local_to_utc({Day, State#state.stock_open_time}, State#state.timezone)),
-  {ok, State#state{current_day = Day, current_stock_open = StockOpen}};
+  Shift = StockOpen - calendar:datetime_to_gregorian_seconds({Day, State#state.stock_open_time}),
+  {ok, State#state{current_day = Day, current_stock_open = StockOpen, shift_to_utc = Shift}};
 %%---
 process_data(Data, State) ->
   lager:debug("IQFeed Level 1 message: ~p", [Data]),
@@ -188,4 +194,4 @@ process_data(Data, State) ->
 -spec bin2time(B :: binary(), CurrentDay :: calendar:date()) -> pos_integer().
 bin2time(<<H:2/binary, $:, M:2/binary, $:, S:2/binary, _/binary>>, State) ->
   DateTime = {State#state.current_day, {binary_to_integer(H), binary_to_integer(M), binary_to_integer(S)}},
-  calendar:datetime_to_gregorian_seconds(localtime:local_to_utc(DateTime, State#state.timezone)).
+  calendar:datetime_to_gregorian_seconds(DateTime) + State#state.shift_to_utc.
