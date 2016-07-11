@@ -77,23 +77,23 @@ get_stock_open_utc() -> gen_server:call(?SERVER, get_stock_open_utc, infinity).
 %%%===================================================================
 init([TickFun, IP, Port, Instrs]) ->
   gen_server:cast(self(), connect),
-  Timezone = iqfeed_util:get_env(iqfeed_client, timezone),
+  Timezone = rz_util:get_env(iqfeed_client, timezone),
   {Day, _} = localtime:utc_to_local(erlang:universaltime(), Timezone),
-  StockOpenTime = iqfeed_util:get_env(iqfeed_client, trading_start),
+  StockOpenTime = rz_util:get_env(iqfeed_client, trading_start),
   LocalSeconds = calendar:datetime_to_gregorian_seconds({Day, StockOpenTime}),
   UTCSeconds = calendar:datetime_to_gregorian_seconds(localtime:local_to_utc({Day, StockOpenTime}, Timezone)),
   Shift = UTCSeconds - LocalSeconds,
-  Handle = case iqfeed_util:get_env(iqfeed_client, tick_dump_enable) of
+  Handle = case rz_util:get_env(iqfeed_client, tick_dump_enable) of
              true ->
-               {ok, H} = file:open(iqfeed_util:get_env(iqfeed_client, tick_dump), ?DUMP_FILE_MODE),
+               {ok, H} = file:open(rz_util:get_env(iqfeed_client, tick_dump), ?DUMP_FILE_MODE),
                H;
              false ->
                undefined
            end,
   {ok, #state{
     dump_file = Handle,
-    dump_current_size = filelib:file_size(iqfeed_util:get_env(iqfeed_client, tick_dump)),
-    dump_max_size = iqfeed_util:get_env(iqfeed_client, tick_dump_max_size),
+    dump_current_size = filelib:file_size(rz_util:get_env(iqfeed_client, tick_dump)),
+    dump_max_size = rz_util:get_env(iqfeed_client, tick_dump_max_size),
     tick_fun = TickFun,
     ip = IP,
     port = Port,
@@ -224,7 +224,7 @@ write_data(Data, State) ->
       State#state{dump_current_size = NewLength};
     true ->
       file:close(State#state.dump_file),
-      FileName = iqfeed_util:get_env(iqfeed_client, tick_dump),
+      FileName = rz_util:get_env(iqfeed_client, tick_dump),
       ok = file:rename(FileName, FileName ++ ".old"),
       {ok, H} = file:open(FileName, ?DUMP_FILE_MODE),
       file:write(H, Data),

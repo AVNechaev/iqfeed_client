@@ -31,16 +31,16 @@ start_link(TickFun) ->
 %%% Supervisor callbacks
 %%%===================================================================
 init([TickFun]) ->
-  {ok, Instr} = iqfeed_util:load_instr_csv(
-    iqfeed_util:get_env(iqfeed_client, instr_file),
-    iqfeed_util:get_env(iqfeed_client, instr_file_header),
-    iqfeed_util:get_env(iqfeed_client, instr_defaults)
+  {ok, Instr} = rz_util:load_instr_csv(
+    rz_util:get_env(iqfeed_client, instr_file),
+    rz_util:get_env(iqfeed_client, instr_file_header),
+    rz_util:get_env(iqfeed_client, instr_defaults)
   ),
   IQLevel1 = {iql1_conn,
     {iql1_conn, start_link, [
       TickFun,
-      iqfeed_util:get_env(iqfeed_client, iqfeed_ip),
-      iqfeed_util:get_env(iqfeed_client, iqfeed_l1_port),
+      rz_util:get_env(iqfeed_client, iqfeed_ip),
+      rz_util:get_env(iqfeed_client, iqfeed_l1_port),
       Instr
     ]},
     permanent, brutal_kill, worker, [iql1_conn]

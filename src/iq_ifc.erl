@@ -14,5 +14,5 @@
 
 %%--------------------------------------------------------------------
 update_instrs(FileName) ->
-  {ok, I} = iqfeed_util:load_instr_csv(FileName),
+  {ok, I} = rz_util:load_instr_csv(FileName),
   iql1_conn:set_instrs(I).
