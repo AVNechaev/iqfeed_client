@@ -12,7 +12,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/4, set_instrs/1, get_instrs/0, get_stock_open_utc/0]).
+-export([start_link/4, set_instrs/1, get_instrs/0, get_stock_open_utc/0, get_shift_to_utc/0]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -71,6 +71,10 @@ get_instrs() -> gen_server:call(?SERVER, get_instrs, infinity).
 %%--------------------------------------------------------------------
 -spec get_stock_open_utc() -> non_neg_integer().
 get_stock_open_utc() -> gen_server:call(?SERVER, get_stock_open_utc, infinity).
+
+%%--------------------------------------------------------------------
+-spec get_shift_to_utc() -> integer().
+get_shift_to_utc() -> gen_server:call(?SERVER, get_shift_to_utc, infinity).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -132,7 +136,7 @@ handle_cast(connect, State = #state{ip = IP, port = Port, sock = S}) when S =:= 
 handle_info({tcp_error, _S, Reason}, State) ->
   lager:warning("IQFeed Level 1 connection lost due to: ~p", [Reason]),
   gen_server:cast(self(), connect),
-  {noreply, State = #state{sock = undefined}};
+  {noreply, State#state{sock = undefined}};
 %%---
 handle_info({tcp_closed, _S}, State) ->
   {noreply, State};
@@ -157,7 +161,9 @@ handle_call({set_instrs, Instrs}, _From, State) ->
 %%---
 handle_call(get_instrs, _From, State) -> {reply, State#state.instrs, State};
 %%---
-handle_call(get_stock_open_utc, _From, State) -> {reply, State#state.current_stock_open, State}.
+handle_call(get_stock_open_utc, _From, State) -> {reply, State#state.current_stock_open, State};
+%%---
+handle_call(get_shift_to_utc, _From, State) -> {reply, State#state.shift_to_utc, State}.
 
 %%--------------------------------------------------------------------
 terminate(_Reason, _State) -> ok.
