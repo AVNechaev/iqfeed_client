@@ -12,7 +12,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0, get_history/3]).
+-export([start_link/0, get_history/3, print_history/2]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -41,7 +41,8 @@
   port :: non_neg_integer(),
   sock = undefined :: undefined | gen_tcp:socket(),
   shift_to_utc :: integer(),
-  req = undefined :: undefined | #curr_req{}
+  req = undefined :: undefined | #curr_req{},
+  trading_start :: calendar:time()
 }).
 
 -define(RECONNECT_TIMEOUT, 500).
@@ -59,6 +60,7 @@ start_link() ->
 %%--------------------------------------------------------------------
 -spec get_history(Instr :: instr_name(), Depth :: non_neg_integer(), OnData :: on_history_fun()) -> get_history_reply().
 get_history(Instr, Depth, OnData) -> gen_server:call(?SERVER, {get_history, Instr, Depth, OnData}).
+print_history(Instr, Depth) -> gen_server:call(?SERVER, {get_history, Instr, Depth, fun(D) -> lager:info("HIST DATA ~p", [D]) end}).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -74,8 +76,9 @@ init([]) ->
   erlang:start_timer(?SHIFT_TO_UTC_TIMEOUT, self(), check_shift_to_utc),
   {ok, #state{
     ip = rz_util:get_env(iqfeed_client, iqfeed_ip),
-    port = rz_util:get_env(iqfeed_client, iqfeed_l2port),
-    shift_to_utc = Shift
+    port = rz_util:get_env(iqfeed_client, iqfeed_l2_port),
+    shift_to_utc = Shift,
+    trading_start = rz_util:get_env(iqfeed_client, trading_start)
   }}.
 
 %%--------------------------------------------------------------------
@@ -131,13 +134,14 @@ handle_call({get_history, Instr, Depth, OnData}, _From, State = #state{sock = So
   Data = [
     <<"HDT,">>,
     Instr, <<",">>,                     %symbol
-    get_date(0, State), <<",">>,               %begindate
-    get_date(Depth, State), <<",">>,           %enddate
+    get_date(Depth, State), <<",">>,               %begindate
+    get_date(0, State), <<",">>,           %enddate
     integer_to_binary(Depth), <<",">>,  %maxdatapoints
     <<"1,">>,                           %datadirection
     <<",">>,                            %requestid
     10, 13                              %datapointspersend
   ],
+  lager:info("SENDING Request: ~p", [iolist_to_binary(Data)]),
   gen_tcp:send(Sock, Data),
   Req = #curr_req{instr = Instr, hist_fun = OnData},
   {reply, ok, State#state{req = Req}}.
@@ -149,7 +153,7 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-process_data(<<"!ENDMSG!">>, State) ->
+process_data(<<"!ENDMSG!", _/binary>>, State) ->
   ((State#state.req)#curr_req.hist_fun)(end_of_data),
   lager:info("Request finished."),
   {ok, State#state{req = undefined}};
@@ -168,7 +172,7 @@ process_data(Data, State) ->
     {ok, State}
   catch
     M:E ->
-      lager:warning("Unexpected L1 update msg: ~p; error: ~p:~p", [Data, M, E]),
+      lager:warning("Unexpected L2 msg: ~p; error: ~p:~p", [Data, M, E]),
       {ok, State}
   end.
 
@@ -179,8 +183,8 @@ get_date(DepthIn, State) ->
   io_lib:format("~4.10.0B~2.10.0B~2.10.0B", [Y, M, D]).
 
 %%--------------------------------------------------------------------
-bin2time(<<Y:4/binary, $-, M:2/binary, $-, D:2/binary, $ , H:2/binary, Mi:2/binary, S:2/binary>>, State) ->
+bin2time(<<Y:4/binary, $-, M:2/binary, $-, D:2/binary>>, State) ->
   DT = {
     {binary_to_integer(Y), binary_to_integer(M), binary_to_integer(D)},
-    {binary_to_integer(H), binary_to_integer(Mi), binary_to_integer(S)}},
+    State#state.trading_start},
   calendar:datetime_to_gregorian_seconds(DT) + State#state.shift_to_utc.
