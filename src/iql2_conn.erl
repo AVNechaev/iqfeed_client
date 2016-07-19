@@ -26,11 +26,6 @@
 
 -include("iqfeed_client.hrl").
 
--type on_history_data() :: {data, {TimeUTC :: non_neg_integer(), #candle{}}} | end_of_data | {error, Reason :: any()}.
--type on_history_fun() :: fun((Data :: on_history_data()) -> ok).
-
--type get_history_reply() :: ok | {error, not_connected} | {error, getting_data}.
-
 -record(curr_req, {
   instr :: instr_name(),
   hist_fun :: on_history_fun()
@@ -111,8 +106,14 @@ handle_info({timeout, _, check_shift_to_utc}, State) ->
 %%---
 handle_info({tcp_error, _S, Reason}, State) ->
   lager:warning("IQFeed Level 2 connection lost due to: ~p", [Reason]),
+  case State#state.req of
+    undefined -> ok;
+    #curr_req{hist_fun = F} ->
+      F({error, {tcp_error, Reason}}),
+      ok
+  end,
   gen_server:cast(self(), connect),
-  {noreply, State#state{sock = undefined}};
+  {noreply, State#state{sock = undefined, req = undefined}};
 %%---
 handle_info({tcp_closed, _S}, State) ->
   {noreply, State};

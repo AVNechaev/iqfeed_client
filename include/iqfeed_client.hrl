@@ -14,4 +14,8 @@
 
 -type(tick_fun() :: fun((Tick :: #tick{}) -> ok)).
 
+-type on_history_data() :: {data, {TimeUTC :: non_neg_integer(), #candle{}}} | end_of_data | {error, Reason :: any()}.
+-type on_history_fun() :: fun((Data :: on_history_data()) -> ok).
+-type get_history_reply() :: ok | {error, not_connected} | {error, getting_data}.
+
 -endif.
