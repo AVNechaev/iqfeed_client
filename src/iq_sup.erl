@@ -46,10 +46,17 @@ init([TickFun]) ->
     permanent, brutal_kill, worker, [iql1_conn]
   },
 
+  IQLevel2 = {iql2_conn,
+    {iql2_conn, start_link, []},
+    permanent, brutal_kill, worker, [iql2_conn]
+  },
+
+
   {ok, {
     {one_for_one, 0, 60},
     [
-      IQLevel1
+      IQLevel1,
+      IQLevel2
     ]}}.
 
 %%%===================================================================
