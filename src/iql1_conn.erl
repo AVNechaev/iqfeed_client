@@ -191,7 +191,11 @@ process_data(AllData = <<"Q,", Data/binary>>, State) ->
     case lists:nth(15, S) of
       <<"C">> ->
         NewState = write_data([integer_to_binary(Tick#tick.time), <<"-">>, Data], State),
-        (State#state.tick_fun)(Tick),
+        case Tick#tick.last_vol of
+          0 -> ok;
+          _ ->
+            (State#state.tick_fun)(Tick),
+        end,
         {ok, NewState};
       _ ->
         {ok, State}
