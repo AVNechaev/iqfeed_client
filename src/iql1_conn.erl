@@ -194,7 +194,7 @@ process_data(AllData = <<"Q,", Data/binary>>, State) ->
         case Tick#tick.last_vol of
           0 -> ok;
           _ ->
-            (State#state.tick_fun)(Tick),
+            (State#state.tick_fun)(Tick)
         end,
         {ok, NewState};
       _ ->
