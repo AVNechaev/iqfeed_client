@@ -191,7 +191,7 @@ process_data(AllData = <<"Q,", Data/binary>>, State) ->
       ask = binary_to_float(lists:nth(9, S))
     },
     case lists:nth(15, S) of
-      <<"C">> ->
+      <<"C", _/binary>> ->
         NewState = write_data([integer_to_binary(Tick#tick.time), <<"-">>, Data], State),
         case Tick#tick.last_vol of
           0 -> ok;
