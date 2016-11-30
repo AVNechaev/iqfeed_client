@@ -36,6 +36,7 @@
   port :: non_neg_integer(),
   sock = undefined :: undefined | gen_tcp:socket(),
   shift_to_utc :: integer(),
+  timezone :: string(),
   req = undefined :: undefined | #curr_req{},
   trading_start :: calendar:time()
 }).
@@ -55,7 +56,8 @@ start_link() ->
 %%--------------------------------------------------------------------
 -spec get_history(Instr :: instr_name(), Depth :: non_neg_integer(), OnData :: on_history_fun()) -> get_history_reply().
 get_history(Instr, Depth, OnData) -> gen_server:call(?SERVER, {get_history, Instr, Depth, OnData}).
-print_history(Instr, Depth) -> gen_server:call(?SERVER, {get_history, Instr, Depth, fun(D) -> lager:info("HIST DATA ~p", [D]) end}).
+print_history(Instr, Depth) ->
+  gen_server:call(?SERVER, {get_history, Instr, Depth, fun(D) -> lager:info("HIST DATA ~p", [D]) end}).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -64,15 +66,13 @@ init([]) ->
   gen_server:cast(self(), connect),
 
   Timezone = rz_util:get_env(iqfeed_client, timezone),
-  DT = localtime:utc_to_local(erlang:universaltime(), Timezone),
-  LocalSeconds = calendar:datetime_to_gregorian_seconds(DT),
-  UTCSeconds = calendar:datetime_to_gregorian_seconds(localtime:local_to_utc(DT, Timezone)),
-  Shift = UTCSeconds - LocalSeconds,
+
   erlang:start_timer(?SHIFT_TO_UTC_TIMEOUT, self(), check_shift_to_utc),
   {ok, #state{
     ip = rz_util:get_env(iqfeed_client, iqfeed_ip),
     port = rz_util:get_env(iqfeed_client, iqfeed_l2_port),
-    shift_to_utc = Shift,
+    shift_to_utc = get_shift_to_utc(Timezone),
+    timezone = Timezone,
     trading_start = rz_util:get_env(iqfeed_client, trading_start)
   }}.
 
@@ -99,8 +99,8 @@ handle_cast(connect, State = #state{ip = IP, port = Port, sock = S}) when S =:= 
   end.
 
 %%--------------------------------------------------------------------
-handle_info({timeout, _, check_shift_to_utc}, State) ->
-  Shift = iql1_conn:get_shift_to_utc(),
+handle_info({timeout, _, check_shift_to_utc}, State = #state{timezone = Timezone}) ->
+  Shift = get_shift_to_utc(Timezone),
   erlang:start_timer(?SHIFT_TO_UTC_TIMEOUT, self(), check_shift_to_utc),
   {noreply, State#state{shift_to_utc = Shift}};
 %%---
@@ -189,3 +189,10 @@ bin2time(<<Y:4/binary, $-, M:2/binary, $-, D:2/binary>>, State) ->
     {binary_to_integer(Y), binary_to_integer(M), binary_to_integer(D)},
     State#state.trading_start},
   calendar:datetime_to_gregorian_seconds(DT) + State#state.shift_to_utc.
+
+%%--------------------------------------------------------------------
+get_shift_to_utc(Timezone) ->
+  DT = localtime:utc_to_local(erlang:universaltime(), Timezone),
+  LocalSeconds = calendar:datetime_to_gregorian_seconds(DT),
+  UTCSeconds = calendar:datetime_to_gregorian_seconds(localtime:local_to_utc(DT, Timezone)),
+  UTCSeconds - LocalSeconds.
