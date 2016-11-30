@@ -31,6 +31,7 @@
   ip :: string(),
   port :: non_neg_integer(),
   instrs = [] :: [instr_name()], %% список акций, по которым запрашиваются тики
+  watch_command :: iolist() | binary() | list(),
   sock = undefined :: undefined | gen_tcp:socket(),
   tick_fun :: tick_fun(),
   timezone :: string(),
@@ -98,6 +99,7 @@ init([TickFun, IP, Port, Instrs]) ->
     dump_file = Handle,
     dump_current_size = filelib:file_size(rz_util:get_env(iqfeed_client, tick_dump)),
     dump_max_size = rz_util:get_env(iqfeed_client, tick_dump_max_size),
+    watch_command = rz_util:get_env(iqfeed_client, instr_watch_command),
     tick_fun = TickFun,
     ip = IP,
     port = Port,
@@ -123,7 +125,7 @@ handle_cast(connect, State = #state{ip = IP, port = Port, sock = S}) when S =:= 
     {ok, Sock} ->
       lager:info("IQFeed Level 1 connection established"),
       gen_tcp:send(Sock, ?HANDSHAKE),
-      init_instrs(Sock, State#state.instrs),
+      init_instrs(Sock, State#state.instrs, State#state.watch_command),
       {noreply, State#state{sock = Sock}};
     {error, Reason} ->
       lager:warning("IQFeed Level 1: couldn't connect due to: ~p", [Reason]),
@@ -154,7 +156,7 @@ handle_call({set_instrs, Instrs}, _From, State) ->
 
   case State#state.sock of
     undefined -> ok;
-    Sock -> init_instrs(Sock, UniqInstrs)
+    Sock -> init_instrs(Sock, UniqInstrs, State#state.watch_command)
   end,
   lager:info("Instruments are loaded."),
   {reply, {Added, Total - Added}, State#state{instrs = UniqInstrs}};
@@ -172,8 +174,8 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-init_instrs(Socket, Instrs) ->
-  lists:foreach(fun(I) -> ok = gen_tcp:send(Socket, [<<"t">>, I, 13, 10]) end, Instrs).
+init_instrs(Socket, Instrs, WatchCommand) ->
+  lists:foreach(fun(I) -> ok = gen_tcp:send(Socket, [WatchCommand, I, 13, 10]) end, Instrs).
 
 %%--------------------------------------------------------------------
 -spec process_data(Data :: binary(), State :: #state{}) -> {ok, NewState :: #state{}}.
