@@ -45,11 +45,20 @@
 
 -define(RECONNECT_TIMEOUT, 500).
 -define(HANDSHAKE, <<"S,SET PROTOCOL,5.1", 10, 13>>).
+-define(UPDATE_FIELDS, [
+  <<"S,SELECT UPDATE FIELDS">>,
+  <<",Most Recent Trade">>,             %% 2
+  <<",Most Recent Trade Size">>,        %% 3
+  <<",Most Recent Trade Date">>,        %% 4 	MM/DD/CCYY
+  <<",Most Recent Trade TimeMS">>,      %% 5
+  <<",Bid">>,                           %% 6
+  <<",Ask">>,                           %% 7
+  <<",Message Contents">>]).            %% 8
 
 -define(DUMP_FILE_MODE, [raw, binary, append, {delayed_write, 1024 * 4096, 1000}]).
 
 -compile([{parse_transform, lager_transform}]).
-%%%========================================================io_lib:format===========
+%%%===================================================================
 %%% API
 %%%===================================================================
 -spec(start_link(
@@ -125,6 +134,7 @@ handle_cast(connect, State = #state{ip = IP, port = Port, sock = S}) when S =:= 
     {ok, Sock} ->
       lager:info("IQFeed Level 1 connection established"),
       gen_tcp:send(Sock, ?HANDSHAKE),
+      gen_tcp:send(Sock, ?UPDATE_FIELDS),
       init_instrs(Sock, State#state.instrs, State#state.watch_command),
       {noreply, State#state{sock = Sock}};
     {error, Reason} ->
@@ -186,11 +196,11 @@ process_data(AllData = <<"Q,", Data/binary>>, State) ->
       name = lists:nth(1, S),
       last_price = binary_to_float(lists:nth(2, S)),
       last_vol = binary_to_integer(lists:nth(3, S)),
-      time = bin2time(lists:nth(4, S), State),
-      bid = binary_to_float(lists:nth(7, S)),
-      ask = binary_to_float(lists:nth(9, S))
+      time = bin2time(lists:nth(4, S), lists:nth(5, S), State),
+      bid = binary_to_float(lists:nth(6, S)),
+      ask = binary_to_float(lists:nth(7, S))
     },
-    case lists:nth(15, S) of
+    case lists:nth(8, S) of
       <<"C", _/binary>> ->
         NewState = write_data([integer_to_binary(Tick#tick.time), <<"-">>, Data], State),
         case Tick#tick.last_vol of
@@ -220,9 +230,12 @@ process_data(Data, State) ->
   {ok, State}.
 
 %%--------------------------------------------------------------------
--spec bin2time(B :: binary(), CurrentDay :: calendar:date()) -> pos_integer().
-bin2time(<<H:2/binary, $:, M:2/binary, $:, S:2/binary, _/binary>>, State) ->
-  DateTime = {State#state.current_day, {binary_to_integer(H), binary_to_integer(M), binary_to_integer(S)}},
+-spec bin2time(Date :: binary(), Time :: binary()) -> pos_integer().
+bin2time(<<Mo:2/binary, $/, D:2/binary, $/, Y:4/binary>>, <<H:2/binary, $:, Mi:2/binary, $:, S:2/binary, _/binary>>, State) ->
+  DateTime = {
+    {binary_to_integer(Y), binary_to_integer(Mo), binary_to_integer(D)},
+    {binary_to_integer(H), binary_to_integer(Mi), binary_to_integer(S)}
+  },
   calendar:datetime_to_gregorian_seconds(DateTime) + State#state.shift_to_utc.
 
 %%--------------------------------------------------------------------
