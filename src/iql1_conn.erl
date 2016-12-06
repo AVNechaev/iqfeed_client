@@ -230,7 +230,7 @@ process_data(Data, State) ->
   {ok, State}.
 
 %%--------------------------------------------------------------------
--spec bin2time(Date :: binary(), Time :: binary()) -> pos_integer().
+-spec bin2time(Date :: binary(), Time :: binary(), State :: #state{}) -> pos_integer().
 bin2time(<<Mo:2/binary, $/, D:2/binary, $/, Y:4/binary>>, <<H:2/binary, $:, Mi:2/binary, $:, S:2/binary, _/binary>>, State) ->
   DateTime = {
     {binary_to_integer(Y), binary_to_integer(Mo), binary_to_integer(D)},
