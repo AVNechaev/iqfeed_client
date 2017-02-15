@@ -53,7 +53,8 @@
   <<",Most Recent Trade TimeMS">>,      %% 5
   <<",Bid">>,                           %% 6
   <<",Ask">>,                           %% 7
-  <<",Message Contents">>, 10, 13]).    %% 8
+  <<",Message Contents">>,              %% 8
+  <<",Bid Time">>, 10, 13]).            %% 9
 
 -define(DUMP_FILE_MODE, [raw, binary, append, {delayed_write, 1024 * 4096, 1000}]).
 
