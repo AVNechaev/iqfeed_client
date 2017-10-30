@@ -106,6 +106,10 @@ handle_info({timeout, _, check_shift_to_utc}, State = #state{timezone = Timezone
 %%---
 handle_info({tcp_error, _S, Reason}, State) ->
   lager:warning("IQFeed Level 2 connection lost due to: ~p", [Reason]),
+  {noreply, State};
+%%---
+handle_info({tcp_closed, _S}, State) ->
+  lager:warning("IQFeed Level 2 connection closed"),
   case State#state.req of
     undefined -> ok;
     #curr_req{hist_fun = F} ->
@@ -114,9 +118,6 @@ handle_info({tcp_error, _S, Reason}, State) ->
   end,
   gen_server:cast(self(), connect),
   {noreply, State#state{sock = undefined, req = undefined}};
-%%---
-handle_info({tcp_closed, _S}, State) ->
-  {noreply, State};
 %%---
 handle_info({tcp, _S, Data}, State = #state{req = CR}) when CR == undefined ->
   lager:info("Got Msg: ~p", [Data]),

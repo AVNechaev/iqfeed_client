@@ -147,12 +147,13 @@ handle_cast(connect, State = #state{ip = IP, port = Port, sock = S}) when S =:= 
 
 %%--------------------------------------------------------------------
 handle_info({tcp_error, _S, Reason}, State) ->
-  lager:warning("IQFeed Level 1 connection lost due to: ~p", [Reason]),
-  gen_server:cast(self(), connect),
-  {noreply, State#state{sock = undefined}};
+  lager:warning("IQFeed Level 1 connection error: ~p", [Reason]),
+  {noreply, State};
 %%---
 handle_info({tcp_closed, _S}, State) ->
-  {noreply, State};
+  lager:warning("IQFeed Level 1 connection closed"),
+  gen_server:cast(self(), connect),
+  {noreply, State#state{sock = undefined}};
 %%---
 handle_info({tcp, _S, Data}, State) ->
   {ok, NewState} = process_data(Data, State),
