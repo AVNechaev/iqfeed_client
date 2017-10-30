@@ -113,7 +113,7 @@ handle_info({tcp_closed, _S}, State) ->
   case State#state.req of
     undefined -> ok;
     #curr_req{hist_fun = F} ->
-      F({error, {tcp_error, Reason}}),
+      F({error, tcp_closed}),
       ok
   end,
   gen_server:cast(self(), connect),
