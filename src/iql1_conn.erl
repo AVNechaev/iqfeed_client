@@ -187,7 +187,7 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 %%% Internal functions
 %%%===================================================================
 init_instrs(Socket, Instrs, WatchCommand) ->
-  lists:foreach(fun(I) -> ok = gen_tcp:send(Socket, [WatchCommand, I, 13, 10]) end, Instrs).
+  lists:foreach(fun(I) -> gen_tcp:send(Socket, [WatchCommand, I, 13, 10]) end, Instrs).
 
 %%--------------------------------------------------------------------
 -spec process_data(Data :: binary(), State :: #state{}) -> {ok, NewState :: #state{}}.
