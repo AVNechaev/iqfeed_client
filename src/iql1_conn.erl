@@ -36,6 +36,8 @@
   tick_fun :: tick_fun(),
   timezone :: string(),
   current_day :: calendar:date(),
+  max_forward_time :: non_neg_integer(), %% maximum difference between current UTC time and tick time (when tick time is "in future"
+  current_utc_forwarded_time :: non_neg_integer(), %% current UTC time shifted to max_forward_time (updated every T message from the Feed)
   stock_open_time :: calendar:time(),
   current_stock_open :: non_neg_integer(), %% UTC
   shift_to_utc :: integer() %% current timezone shift to UTC
@@ -97,6 +99,7 @@ init([TickFun, IP, Port, Instrs]) ->
   StockOpenTime = rz_util:get_env(iqfeed_client, trading_start),
   LocalSeconds = calendar:datetime_to_gregorian_seconds({Day, StockOpenTime}),
   UTCSeconds = calendar:datetime_to_gregorian_seconds(localtime:local_to_utc({Day, StockOpenTime}, Timezone)),
+  MaxForwardTime = rz_util:get_env(iqfeed_client, max_forward_time),
   Shift = UTCSeconds - LocalSeconds,
   Handle = case rz_util:get_env(iqfeed_client, tick_dump_enable) of
              true ->
@@ -116,6 +119,8 @@ init([TickFun, IP, Port, Instrs]) ->
     instrs = lists:usort(Instrs),
     timezone = Timezone,
     current_day = Day,
+    max_forward_time = MaxForwardTime,
+    current_utc_forwarded_time = calendar:datetime_to_gregorian_seconds(erlang:universaltime()) + MaxForwardTime,
     stock_open_time = StockOpenTime,
     current_stock_open = calendar:datetime_to_gregorian_seconds(localtime:local_to_utc({Day, StockOpenTime}, Timezone)),
     shift_to_utc = Shift
@@ -202,17 +207,22 @@ process_data(AllData = <<"Q,", Data/binary>>, State) ->
       bid = binary_to_float(lists:nth(6, S)),
       ask = binary_to_float(lists:nth(7, S))
     },
-    case lists:nth(8, S) of
-      <<"C", _/binary>> ->
-        NewState = write_data([integer_to_binary(Tick#tick.time), <<"-">>, Data], State),
-        case Tick#tick.last_vol of
-          0 -> ok;
-          _ ->
-            (State#state.tick_fun)(Tick)
-        end,
-        {ok, NewState};
+    case Tick#tick.time of
+      T when T > State#state.current_utc_forwarded_time ->
+        lager:warning("TICK-IN-FUTURE detected: ~p", [T]);
       _ ->
-        {ok, State}
+        case lists:nth(8, S) of
+          <<"C", _/binary>> ->
+            NewState = write_data([integer_to_binary(Tick#tick.time), <<"-">>, Data], State),
+            case Tick#tick.last_vol of
+              0 -> ok;
+              _ ->
+                (State#state.tick_fun)(Tick)
+            end,
+            {ok, NewState};
+          _ ->
+            {ok, State}
+        end
     end
   catch
     M:E ->
@@ -220,12 +230,20 @@ process_data(AllData = <<"Q,", Data/binary>>, State) ->
       {ok, State}
   end;
 %%---
-process_data(<<"T,", Y:4/binary, M:2/binary, D:2/binary, " ", _/binary>>, State) ->
+process_data(<<"T,", Y:4/binary, M:2/binary, D:2/binary, " ", _/binary>>, State = #state{max_forward_time = MFT}) ->
   Day = {binary_to_integer(Y), binary_to_integer(M), binary_to_integer(D)},
   StockOpen = calendar:datetime_to_gregorian_seconds(
     localtime:local_to_utc({Day, State#state.stock_open_time}, State#state.timezone)),
   Shift = StockOpen - calendar:datetime_to_gregorian_seconds({Day, State#state.stock_open_time}),
-  {ok, State#state{current_day = Day, current_stock_open = StockOpen, shift_to_utc = Shift}};
+  {
+    ok,
+    State#state{
+      current_day = Day,
+      current_stock_open = StockOpen,
+      shift_to_utc = Shift,
+      current_utc_forwarded_time = calendar:datetime_to_gregorian_seconds(erlang:universaltime()) + MFT
+    }
+  };
 %%---
 process_data(Data, State) ->
   lager:debug("IQFeed Level 1 message: ~p", [Data]),
