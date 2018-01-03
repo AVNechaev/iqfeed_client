@@ -40,7 +40,9 @@
   current_utc_forwarded_time :: non_neg_integer(), %% current UTC time shifted to max_forward_time (updated every T message from the Feed)
   stock_open_time :: calendar:time(),
   current_stock_open :: non_neg_integer(), %% UTC
-  shift_to_utc :: integer() %% current timezone shift to UTC
+  shift_to_utc :: integer(), %% current timezone shift to UTC
+  ticks_enabled :: boolean(),
+  enable_ticks_at_dayoffs :: boolean()
 }).
 
 -define(SERVER, ?MODULE).
@@ -108,6 +110,7 @@ init([TickFun, IP, Port, Instrs]) ->
              false ->
                undefined
            end,
+  EnableTicksAtDayoffs = rz_util:get_env(iqfeed_client, enable_ticks_at_dayoffs),
   {ok, #state{
     dump_file = Handle,
     dump_current_size = filelib:file_size(rz_util:get_env(iqfeed_client, tick_dump)),
@@ -123,7 +126,9 @@ init([TickFun, IP, Port, Instrs]) ->
     current_utc_forwarded_time = calendar:datetime_to_gregorian_seconds(erlang:universaltime()) + MaxForwardTime,
     stock_open_time = StockOpenTime,
     current_stock_open = calendar:datetime_to_gregorian_seconds(localtime:local_to_utc({Day, StockOpenTime}, Timezone)),
-    shift_to_utc = Shift
+    shift_to_utc = Shift,
+    enable_ticks_at_dayoffs = EnableTicksAtDayoffs,
+    ticks_enabled = ticks_enabled_locally(EnableTicksAtDayoffs)
   }}.
 
 %%--------------------------------------------------------------------
@@ -196,6 +201,7 @@ init_instrs(Socket, Instrs, WatchCommand) ->
 
 %%--------------------------------------------------------------------
 -spec process_data(Data :: binary(), State :: #state{}) -> {ok, NewState :: #state{}}.
+process_data(<<"Q,", _/binary>>, State = #state{ticks_enabled = false}) -> {ok, State};
 process_data(AllData = <<"Q,", Data/binary>>, State) ->
   S = binary:split(Data, <<",">>, [global]),
   try
@@ -241,7 +247,8 @@ process_data(<<"T,", Y:4/binary, M:2/binary, D:2/binary, " ", _/binary>>, State 
       current_day = Day,
       current_stock_open = StockOpen,
       shift_to_utc = Shift,
-      current_utc_forwarded_time = calendar:datetime_to_gregorian_seconds(erlang:universaltime()) + MFT
+      current_utc_forwarded_time = calendar:datetime_to_gregorian_seconds(erlang:universaltime()) + MFT,
+      ticks_enabled = ticks_enabled_locally(State#state.enable_ticks_at_dayoffs)
     }
   };
 %%---
@@ -274,4 +281,15 @@ write_data(Data, State) ->
       {ok, H} = file:open(FileName, ?DUMP_FILE_MODE),
       file:write(H, Data),
       State#state{dump_current_size = erlang:iolist_size(Data), dump_file = H}
+  end.
+
+%%--------------------------------------------------------------------
+-spec ticks_enabled_locally(EnableAtDayoffs :: boolean()) -> boolean().
+ticks_enabled_locally(true) -> true;
+ticks_enabled_locally(false) ->
+  {D, _} = calendar:local_time(),
+  case calendar:day_of_the_week(D) of
+    6 -> false;
+    7 -> false;
+    _ -> true
   end.
