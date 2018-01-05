@@ -42,7 +42,8 @@
   current_stock_open :: non_neg_integer(), %% UTC
   shift_to_utc :: integer(), %% current timezone shift to UTC
   ticks_enabled :: boolean(),
-  enable_ticks_at_dayoffs :: boolean()
+  enable_ticks_at_dayoffs :: boolean(),
+  shift_to_dayoff_tz :: integer() %% shift from IQFeed TZ to the TZ when filter out dayoffs (local)
 }).
 
 -define(SERVER, ?MODULE).
@@ -111,7 +112,7 @@ init([TickFun, IP, Port, Instrs]) ->
                undefined
            end,
   EnableTicksAtDayoffs = rz_util:get_env(iqfeed_client, enable_ticks_at_dayoffs),
-  {ok, #state{
+  State = #state{
     dump_file = Handle,
     dump_current_size = filelib:file_size(rz_util:get_env(iqfeed_client, tick_dump)),
     dump_max_size = rz_util:get_env(iqfeed_client, tick_dump_max_size),
@@ -128,8 +129,10 @@ init([TickFun, IP, Port, Instrs]) ->
     current_stock_open = calendar:datetime_to_gregorian_seconds(localtime:local_to_utc({Day, StockOpenTime}, Timezone)),
     shift_to_utc = Shift,
     enable_ticks_at_dayoffs = EnableTicksAtDayoffs,
-    ticks_enabled = ticks_enabled_locally(EnableTicksAtDayoffs)
-  }}.
+    ticks_enabled = true,
+    shift_to_dayoff_tz = calendar:datetime_to_gregorian_seconds(erlang:localtime()) - calendar:datetime_to_gregorian_seconds(erlang:universaltime())
+  },
+  {ok, State#state{ticks_enabled = ticks_enabled_locally(State)}}.
 
 %%--------------------------------------------------------------------
 handle_cast(connect, State = #state{ip = IP, port = Port, sock = S}) when S =:= undefined ->
@@ -213,22 +216,27 @@ process_data(AllData = <<"Q,", Data/binary>>, State) ->
       bid = binary_to_float(lists:nth(6, S)),
       ask = binary_to_float(lists:nth(7, S))
     },
-    case Tick#tick.time of
-      T when T > State#state.current_utc_forwarded_time ->
-        lager:warning("TICK-IN-FUTURE detected: ~p", [T]);
-      _ ->
-        case lists:nth(8, S) of
-          <<"C", _/binary>> ->
-            NewState = write_data([integer_to_binary(Tick#tick.time), <<"-">>, Data], State),
-            case Tick#tick.last_vol of
-              0 -> ok;
-              _ ->
-                (State#state.tick_fun)(Tick)
-            end,
-            {ok, NewState};
+    case ticks_enabled(State, calendar:gregorian_seconds_to_datetime(Tick#tick.time + State#state.shift_to_dayoff_tz)) of
+      true ->
+        case Tick#tick.time of
+          T when T > State#state.current_utc_forwarded_time ->
+            lager:warning("TICK-IN-FUTURE detected: ~p", [T]);
           _ ->
-            {ok, State}
-        end
+            case lists:nth(8, S) of
+              <<"C", _/binary>> ->
+                NewState = write_data([integer_to_binary(Tick#tick.time), <<"-">>, Data], State),
+                case Tick#tick.last_vol of
+                  0 -> ok;
+                  _ ->
+                    (State#state.tick_fun)(Tick)
+                end,
+                {ok, NewState#state{ticks_enabled = true}};
+              _ ->
+                {ok, State#state{ticks_enabled = true}}
+            end
+        end;
+      false ->
+        {ok, State#state{ticks_enabled = false}}
     end
   catch
     M:E ->
@@ -248,7 +256,7 @@ process_data(<<"T,", Y:4/binary, M:2/binary, D:2/binary, " ", _/binary>>, State 
       current_stock_open = StockOpen,
       shift_to_utc = Shift,
       current_utc_forwarded_time = calendar:datetime_to_gregorian_seconds(erlang:universaltime()) + MFT,
-      ticks_enabled = ticks_enabled_locally(State#state.enable_ticks_at_dayoffs)
+      ticks_enabled = ticks_enabled_locally(State)
     }
   };
 %%---
@@ -284,12 +292,21 @@ write_data(Data, State) ->
   end.
 
 %%--------------------------------------------------------------------
--spec ticks_enabled_locally(EnableAtDayoffs :: boolean()) -> boolean().
-ticks_enabled_locally(true) -> true;
-ticks_enabled_locally(false) ->
-  {D, _} = calendar:local_time(),
-  case calendar:day_of_the_week(D) of
-    6 -> false;
-    7 -> false;
-    _ -> true
-  end.
+-spec ticks_enabled(State :: #state{}, DT :: calendar:datetime()) -> boolean.
+ticks_enabled(#state{enable_ticks_at_dayoffs =  true}, _) -> true;
+ticks_enabled(#state{ticks_enabled = CurrentlyEnabled}, {D, _}) ->
+  NewEnabled =
+    case calendar:day_of_the_week(D) of
+      6 -> false;
+      7 -> false;
+      _ -> true
+    end,
+  case NewEnabled of
+    CurrentlyEnabled -> ok;
+    _ -> lager:info("IQL1:: change dayoff tick filter to: ~p", [NewEnabled])
+  end,
+  NewEnabled.
+
+%%--------------------------------------------------------------------
+-spec ticks_enabled_locally(State :: #state{}) -> boolean().
+ticks_enabled_locally(State) -> ticks_enabled(State, erlang:localtime()).
