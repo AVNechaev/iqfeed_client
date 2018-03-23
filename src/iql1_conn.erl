@@ -137,7 +137,7 @@ init([TickFun, IP, Port, Instrs]) ->
 %%--------------------------------------------------------------------
 handle_cast(connect, State = #state{ip = IP, port = Port, sock = S}) when S =:= undefined ->
   SockOpts = [
-    {active, true},
+    {active, once},
     {delay_send, false},
     {mode, binary},
     binary,
@@ -161,6 +161,7 @@ handle_cast(connect, State = #state{ip = IP, port = Port, sock = S}) when S =:= 
 %%--------------------------------------------------------------------
 handle_info({tcp_error, _S, Reason}, State) ->
   lager:warning("IQFeed Level 1 connection error: ~p", [Reason]),
+  inet:setopts(S, [{active, once}]),
   {noreply, State};
 %%---
 handle_info({tcp_closed, _S}, State) ->
@@ -168,8 +169,9 @@ handle_info({tcp_closed, _S}, State) ->
   gen_server:cast(self(), connect),
   {noreply, State#state{sock = undefined}};
 %%---
-handle_info({tcp, _S, Data}, State) ->
+handle_info({tcp, S, Data}, State) ->
   {ok, NewState} = process_data(Data, State),
+  inet:setopts(S, [{active, once}]),
   {noreply, NewState}.
 
 %%--------------------------------------------------------------------
