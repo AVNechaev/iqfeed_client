@@ -159,7 +159,7 @@ handle_cast(connect, State = #state{ip = IP, port = Port, sock = S}) when S =:= 
   end.
 
 %%--------------------------------------------------------------------
-handle_info({tcp_error, _S, Reason}, State) ->
+handle_info({tcp_error, S, Reason}, State) ->
   lager:warning("IQFeed Level 1 connection error: ~p", [Reason]),
   inet:setopts(S, [{active, once}]),
   {noreply, State};
