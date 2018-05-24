@@ -359,7 +359,7 @@ write_data(Data, State) ->
 %%--------------------------------------------------------------------
 -spec ticks_enabled(State :: #state{}, TickTime :: pos_integer()) -> #state{}.
 ticks_enabled(State = #state{enable_ticks_at_dayoffs =  true}, _) -> State;
-ticks_enabled(State = #state{last_known_tick_time = TickTime, enable_ticks_at_dayoffs = Enabled}, TickTime) -> State;
+ticks_enabled(State = #state{last_known_tick_time = TickTime}, TickTime) -> State;
 ticks_enabled(State = #state{ticks_enabled = CurrentlyEnabled, shift_to_dayoff_tz = Shift}, TickTime) ->
   {D, _} = calendar:gregorian_seconds_to_datetime(TickTime + Shift),
   NewEnabled =
